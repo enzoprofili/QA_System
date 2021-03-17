@@ -14,24 +14,6 @@ def parse_question():
   keywords = [t[0].lower() for t in qtokens if search("NOUN|PROPN|ADJ|NUM", t[1])]
   return keywords, qtokens_pos
 
-def fetch_docs():
-  all_docs = []
-
-  os.chdir('C:\\Users\\enzop\\Desktop\\Enzo\\Northwestern\\IEMS308\\HW3\\BI-articles\\2013') #set your path
-  for filename in os.listdir(os.getcwd()):
-    text = open(filename,"r", encoding="utf8").read()
-    all_docs.append(text)
-  
-  os.chdir(r"C:\Users\enzop\Desktop\Enzo\Northwestern\IEMS308\HW3\BI-articles\2014")
-  for filename in os.listdir(os.getcwd()):
-    text = open(filename,"r", encoding="utf8").read()
-    all_docs.append(text)
-  
-  # fix text
-  for i in range(1, len(all_docs)):
-    all_docs[i] = all_docs[i].replace("\\"," ").replace("\n"," ").replace('"', " ").replace("'", " ").replace("%","").replace(" ,","")
-  return all_docs
-    
 def sentencetfidf(doc_indexes):
   all_docs = []
 

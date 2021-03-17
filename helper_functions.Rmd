@@ -1,0 +1,183 @@
+---
+title: "Helper Functions"
+author: "Enzo Profli"
+date: "16/03/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(reticulate)
+library(stringr)
+library(readr)
+library(stringi)
+library(tokenizers)
+library(babynames)
+library(maps)
+library(dplyr)
+library(tm)
+library(pROC)
+library(randomForest)
+library(Matrix)
+library(caret)
+library(e1071)
+```
+
+```{python pysetup, include = FALSE}
+import pandas as pd
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk import pos_tag
+import re
+from re import search
+import os
+import sklearn.feature_extraction.text as nlproc
+import sklearn.metrics.pairwise as metrics
+from sklearn.preprocessing import LabelEncoder
+from sklearn import metrics
+from sklearn.externals import joblib
+from collections import Counter
+import spacy 
+nlp = spacy.load('en_core_web_sm')
+```
+
+## Train Question Model
+
+https://github.com/explosion/spaCy/blob/master/spacy/glossary.py
+https://cogcomp.seas.upenn.edu/Data/QA/QC/
+
+```{r cleaning}
+# set up question dataset
+q <- read.csv("question_training.csv")
+names(q) <- "line"
+q$TAG <- gsub(" .*", "", q$line)
+q$question <- gsub("^\\S+\\s+", "", q$line)
+
+#translate UIUC tags to Spacy package tags
+q <- q %>%
+      mutate(spacy_tag = case_when(TAG == "ENTY:cremat" ~ "WORK_OF_ART",
+                                   TAG %in% c("ENTY:currency", "NUM:money") ~ "MONEY",
+                                   TAG == "ENTY:event" ~ "EVENT",
+                                   TAG == "ENTY:other" ~ "MISC",
+                                   TAG %in% c("ENTY:food", "ENTY:instru", "ENTY:product", 
+                                              "ENTY:substance", "ENTY:veh") ~ "PRODUCT",
+                                   TAG == "ENTY:lang" ~ "LANGUAGE",
+                                   TAG == "ENTY:religion" ~ "NORP",
+                                   TAG %in% c("ENTY:sport", "HUM:gr") ~ "ORG",
+                                   TAG == "HUM:ind" ~ "PERSON",
+                                   TAG %in% c("LOC:city", "LOC:country", "LOC:state") ~ "GPE",
+                                   TAG %in% c("LOC:mountain", "LOC:other") ~ "LOC",
+                                   TAG %in% c("NUM:code", "NUM:count", "NUM:other", "NUM:speed", 
+                                              "NUM:temp", "NUM:size", "NUM:weight") ~ "CARDINAL",
+                                   TAG == "NUM:date" ~ "DATE",
+                                   TAG == "NUM:distance" ~ "QUANTITY",
+                                   TAG == "NUM:ranks" ~ "ORDINAL",
+                                   TAG == "NUM:period" ~ "TIME",
+                                   TAG == "NUM:percent" ~ "PERCENT")) %>%
+      select(spacy_tag, question) %>%
+      filter(!is.na(spacy_tag))
+```
+
+```{python qsetup}
+q = r.q
+
+tokenlist = []
+
+#generate list of lists with tokens + POS tag
+for i in range(0,len(q)):
+  doc = nlp(q.iloc[i,1])
+  doctokens = []
+  
+  for j in range(0,len(doc)-1): 
+    a = doc[j].text + "_" + doc[j].pos_
+    doctokens.append(a)
+    
+  tokenlist.append(doctokens)
+```
+
+```{r qmodel}
+# add each name + POS_tag combo as feature for model
+ner_q <- py$tokenlist
+unique_qwords <- unique(unlist(ner_q))
+
+##takes about 15 minutes
+library(stringi)
+add_features <- function(word){
+  vector <- suppressWarnings(stri_detect_fixed(ner_q, word))
+  q <<- q %>%
+          mutate(!!word := vector)
+}
+
+lapply(unique_qwords, FUN = add_features)
+
+#remove very infrequent words (retains 736 words)
+q_final <- q %>%
+             select_if(function(.) {is.character(.) || sum(.) > 5}) %>%
+             select(-one_of("question"))
+
+#exclude columns with weird names (unfortunately removes punctuation)
+names(q_final) <- paste0("X", names(q_final))
+q_final <- q_final[,!grepl("[^a-zA-Z0-9_]", names(q_final))]
+q_final[,-1] <- sapply(q_final[,-1], as.numeric)
+q_final$Xspacy_tag <- as.factor(q_final$Xspacy_tag)
+saveRDS(names(q_final)[-1], "./model_features.rds") # save feature names (necessary for predictions)
+
+#classify questions
+library(caret)
+training_index <- createDataPartition(q_final$Xspacy_tag, p = 0.80, list = FALSE)
+train_dataset <- q_final[training_index, ]
+test_dataset <- q_final[-training_index, ]
+rf <- randomForest(Xspacy_tag ~ ., 
+                   data = train_dataset)
+
+#predict on test dataset
+y_pred = predict(rf, newdata = test_dataset)
+saveRDS(rf, "./question_classification_model.rds")
+cm <- confusionMatrix(y_pred, test_dataset$Xspacy_tag)
+saveRDS(cm, "./confusion_matrix.rds")
+```
+
+
+## Generate Document TF-IDF
+
+```{python doctfidf, include = FALSE}
+#generate tfidf matrix
+##load .txt files into a list
+all_docs = []
+
+os.chdir('C:\\Users\\enzop\\Desktop\\Enzo\\Northwestern\\IEMS308\\HW3\\BI-articles\\2013') #set your path
+for filename in os.listdir(os.getcwd()):
+  text = open(filename,"r", encoding="utf8").read()
+  all_docs.append(text)
+
+os.chdir(r"C:\Users\enzop\Desktop\Enzo\Northwestern\IEMS308\HW3\BI-articles\2014")
+for filename in os.listdir(os.getcwd()):
+  text = open(filename,"r", encoding="utf8").read()
+  all_docs.append(text)
+
+# fix text
+for i in range(1, len(all_docs)):
+  all_docs[i] = all_docs[i].replace("\\"," ").replace("\n"," ").replace('"', " ").replace("'", " ").replace("%","").replace(" ,","")
+  
+with open("all_docs.txt", "wb") as fp:   #Pickling
+  pickle.dump(all_docs, fp)
+
+# generate matrix
+vectorizer = nlproc.TfidfVectorizer()
+vectors = vectorizer.fit_transform([x.lower() for x in all_docs])
+feature_names = vectorizer.get_feature_names()
+```
+
+```{r tfidfcalc}
+tfidf <- py$vectors
+features <- py$feature_names
+dimnames(tfidf) <- list(1:length(py$all_docs), features)
+keywords <- as.vector(py$keywords)
+
+saveRDS(tfidf, "tfidf_docs.rds")
+```

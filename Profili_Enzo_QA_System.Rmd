@@ -203,31 +203,6 @@ QA_System <- function() {
 }
 ```
 
-```{python testing}
-with open("all_docs.txt", "rb") as fp:   # Unpickling
-    all_docs = pickle.load(fp)
-  
-#fetch selected documents
-selected_docs_index = [x - 1 for x in r.selected_docs] #adjust indexes
-selected_docs_py = [all_docs[i] for i in selected_docs_index]
-
-
-#segment documents into sentences
-sentences = []
-for i in range(0, len(selected_docs_py)):
-  sentences.append(sent_tokenize(selected_docs_py[i]))
-
-sentences_flat = [item for sublist in sentences for item in sublist]
-
-#run tfidf on sentences
-vectorizer = nlproc.TfidfVectorizer()
-vectors = vectorizer.fit_transform([x.lower() for x in sentences_flat])
-feature_names = vectorizer.get_feature_names()
-return vectors, feature_names, sentences_flat
-
-
-```
-
 ```{r qamodel}
 # RUN THIS!
 ## after running chunks above
